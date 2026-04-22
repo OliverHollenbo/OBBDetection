@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import mmcv
+from mmdet.models.losses.fgd_loss import FGDLoss
 
 # from mmdet.core import bbox2result, bbox2roi, build_assigner, build_sampler
 from mmdet.models.builder import DETECTORS, build_backbone, build_head, build_neck
@@ -22,7 +24,9 @@ class OBBTwoStageDetector(OBBBaseDetector, RotateAugRPNTestMixin):
                  roi_head=None,
                  train_cfg=None,
                  test_cfg=None,
-                 pretrained=None):
+                 pretrained=None,
+                 teacher_ckpt=None,
+                 distill_alpha=0.0005):
         super(OBBTwoStageDetector, self).__init__()
         self.backbone = build_backbone(backbone)
 
@@ -47,6 +51,47 @@ class OBBTwoStageDetector(OBBBaseDetector, RotateAugRPNTestMixin):
         self.test_cfg = test_cfg
 
         self.init_weights(pretrained=pretrained)
+
+        # Knowledge distillation — load frozen ResNet-50 teacher
+        self.fgd_loss = None
+        if teacher_ckpt is not None:
+            # Always build teacher with ResNet-50 + FPN config
+            teacher_backbone_cfg = dict(
+                type='ResNet',
+                depth=50,
+                num_stages=4,
+                out_indices=(0, 1, 2, 3),
+                frozen_stages=1,
+                norm_cfg=dict(type='BN', requires_grad=True),
+                norm_eval=True,
+                style='pytorch')
+            teacher_neck_cfg = dict(
+                type='FPN',
+                in_channels=[256, 512, 1024, 2048],
+                out_channels=256,
+                num_outs=5)
+            self.teacher_backbone = build_backbone(teacher_backbone_cfg)
+            self.teacher_neck = build_neck(teacher_neck_cfg)
+            # Load weights from checkpoint
+            state = torch.load(teacher_ckpt, map_location='cpu')
+            state_dict = state['state_dict'] if 'state_dict' in state else state
+            teacher_bb = {k[9:]: v for k, v in state_dict.items()
+                         if k.startswith('backbone.')}
+            teacher_nk = {k[5:]: v for k, v in state_dict.items()
+                         if k.startswith('neck.')}
+            self.teacher_backbone.load_state_dict(teacher_bb, strict=False)
+            self.teacher_neck.load_state_dict(teacher_nk, strict=False)
+            # Freeze teacher
+            for param in self.teacher_backbone.parameters():
+                param.requires_grad = False
+            for param in self.teacher_neck.parameters():
+                param.requires_grad = False
+            self.teacher_backbone.eval()
+            self.teacher_neck.eval()
+            self.fgd_loss = FGDLoss(
+                alpha_focal=distill_alpha,
+                alpha_global=distill_alpha)
+            print(f'Loaded ResNet-50 teacher from {teacher_ckpt}')
 
     @property
     def with_rpn(self):
@@ -154,6 +199,19 @@ class OBBTwoStageDetector(OBBBaseDetector, RotateAugRPNTestMixin):
         x = self.extract_feat(img)
 
         losses = dict()
+
+        # Knowledge distillation loss
+        if self.fgd_loss is not None:
+            with torch.no_grad():
+                t = self.teacher_backbone(img)
+                t = self.teacher_neck(t)
+            # Use first 4 FPN levels (P2-P5)
+            distill_losses = self.fgd_loss(
+                list(x[:4]),
+                list(t[:4]),
+                gt_bboxes,
+                img_metas)
+            losses.update(distill_losses)
 
         # RPN forward and loss
         if self.with_rpn:
