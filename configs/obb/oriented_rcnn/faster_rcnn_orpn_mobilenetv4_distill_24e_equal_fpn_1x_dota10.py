@@ -1,13 +1,14 @@
 _base_ = [
     '../_base_/datasets/dota.py',
-    '../_base_/schedules/schedule_1x.py',
+    '../_base_/schedules/schedule_2x.py',
     '../../_base_/default_runtime.py'
 ]
 model = dict(
     type='OrientedRCNN',
     pretrained=None,
     teacher_ckpt='work_dirs/oriented_rcnn_r50_baseline/epoch_12.pth',
-    distill_alpha=0.001,
+    distill_alpha=0.0005,
+    level_weights=[1.0, 1.0, 1.0, 1.0],
     backbone=dict(
         type='MobileNetV4',
         model_name='mobilenetv4_conv_small',

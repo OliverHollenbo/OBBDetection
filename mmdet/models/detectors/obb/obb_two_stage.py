@@ -26,7 +26,8 @@ class OBBTwoStageDetector(OBBBaseDetector, RotateAugRPNTestMixin):
                  test_cfg=None,
                  pretrained=None,
                  teacher_ckpt=None,
-                 distill_alpha=0.0005):
+                 distill_alpha=0.0005,
+                 level_weights=None):
         super(OBBTwoStageDetector, self).__init__()
         self.backbone = build_backbone(backbone)
 
@@ -55,21 +56,32 @@ class OBBTwoStageDetector(OBBBaseDetector, RotateAugRPNTestMixin):
         # Knowledge distillation — load frozen ResNet-50 teacher
         self.fgd_loss = None
         if teacher_ckpt is not None:
-            # Always build teacher with ResNet-50 + FPN config
-            teacher_backbone_cfg = dict(
-                type='ResNet',
-                depth=50,
-                num_stages=4,
-                out_indices=(0, 1, 2, 3),
-                frozen_stages=1,
-                norm_cfg=dict(type='BN', requires_grad=True),
-                norm_eval=True,
-                style='pytorch')
-            teacher_neck_cfg = dict(
-                type='FPN',
-                in_channels=[256, 512, 1024, 2048],
-                out_channels=256,
-                num_outs=5)
+            # Auto-detect teacher architecture from checkpoint keys
+            state_check = torch.load(teacher_ckpt, map_location='cpu')
+            sd_check = state_check.get('state_dict', state_check)
+            backbone_keys = [k for k in sd_check.keys() if k.startswith('backbone.')]
+            is_resnet = any('layer1' in k for k in backbone_keys)
+
+            if is_resnet:
+                # Teacher is ResNet-50
+                teacher_backbone_cfg = dict(
+                    type='ResNet',
+                    depth=50,
+                    num_stages=4,
+                    out_indices=(0, 1, 2, 3),
+                    frozen_stages=1,
+                    norm_cfg=dict(type='BN', requires_grad=True),
+                    norm_eval=True,
+                    style='pytorch')
+                teacher_neck_cfg = dict(
+                    type='FPN',
+                    in_channels=[256, 512, 1024, 2048],
+                    out_channels=256,
+                    num_outs=5)
+            else:
+                # Teacher is MobileNetV4 — use student backbone+neck config
+                teacher_backbone_cfg = backbone
+                teacher_neck_cfg = neck
             self.teacher_backbone = build_backbone(teacher_backbone_cfg)
             self.teacher_neck = build_neck(teacher_neck_cfg)
             # Load weights from checkpoint
@@ -90,8 +102,9 @@ class OBBTwoStageDetector(OBBBaseDetector, RotateAugRPNTestMixin):
             self.teacher_neck.eval()
             self.fgd_loss = FGDLoss(
                 alpha_focal=distill_alpha,
-                alpha_global=distill_alpha)
-            print(f'Loaded ResNet-50 teacher from {teacher_ckpt}')
+                alpha_global=distill_alpha,
+                level_weights=level_weights)
+            print(f'Loaded teacher from {teacher_ckpt}')
 
     @property
     def with_rpn(self):

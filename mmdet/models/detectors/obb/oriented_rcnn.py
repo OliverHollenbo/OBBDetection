@@ -12,7 +12,8 @@ class OrientedRCNN(OBBTwoStageDetector):
                  test_cfg=None,
                  pretrained=None,
                  teacher_ckpt=None,
-                 distill_alpha=0.0005):
+                 distill_alpha=0.0005,
+                 level_weights=None):
         super(OrientedRCNN, self).__init__(
             backbone=backbone,
             neck=neck,
@@ -22,4 +23,5 @@ class OrientedRCNN(OBBTwoStageDetector):
             test_cfg=test_cfg,
             pretrained=pretrained,
             teacher_ckpt=teacher_ckpt,
-            distill_alpha=distill_alpha)
+            distill_alpha=distill_alpha,
+            level_weights=level_weights)

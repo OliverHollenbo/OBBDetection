@@ -97,11 +97,18 @@ class FGDLoss(nn.Module):
     def __init__(self,
                  alpha_focal=0.0005,
                  alpha_global=0.0005,
-                 loss_weight=1.0):
+                 loss_weight=1.0,
+                 level_weights=None):
         super(FGDLoss, self).__init__()
         self.alpha_focal = alpha_focal
         self.alpha_global = alpha_global
         self.loss_weight = loss_weight
+        # Weights per FPN level [P2, P3, P4, P5]
+        # Default: emphasise deeper levels where capacity gap is smaller
+        if level_weights is None:
+            self.level_weights = [0.5, 0.5, 1.0, 2.0]
+        else:
+            self.level_weights = level_weights
 
     def forward(self,
                 student_feats,
@@ -124,10 +131,11 @@ class FGDLoss(nn.Module):
         loss_focal_total = 0.0
         loss_global_total = 0.0
 
-        for s_feat, t_feat in zip(student_feats, teacher_feats):
-            loss_focal_total += focal_loss(
+        for i, (s_feat, t_feat) in enumerate(zip(student_feats, teacher_feats)):
+            w = self.level_weights[i] if i < len(self.level_weights) else 1.0
+            loss_focal_total += w * focal_loss(
                 s_feat, t_feat, gt_bboxes, img_metas)
-            loss_global_total += global_loss(s_feat, t_feat)
+            loss_global_total += w * global_loss(s_feat, t_feat)
 
         loss_focal_total = self.alpha_focal * loss_focal_total
         loss_global_total = self.alpha_global * loss_global_total
