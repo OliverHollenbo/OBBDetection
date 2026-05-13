@@ -6,7 +6,6 @@ with open('/home/cv01f26/DATA/split_ss_dota1_0/val/annfiles/patch_annfile.pkl', 
 
 cls = data['cls']
 
-# build a filename -> item lookup
 fname_to_item = {item['filename']: item for item in data['content']}
 
 results = []

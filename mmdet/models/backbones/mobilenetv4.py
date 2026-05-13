@@ -5,13 +5,6 @@ from mmdet.models.builder import BACKBONES
 
 @BACKBONES.register_module()
 class MobileNetV4(nn.Module):
-    """MobileNetV4 backbone via timm.
-    
-    Args:
-        model_name (str): timm model name e.g. 'mobilenetv4_conv_small'
-        pretrained (bool): load ImageNet pretrained weights
-        out_indices (tuple): which stages to output (0-4)
-    """
     
     def __init__(self,
                  model_name='mobilenetv4_conv_small',
@@ -29,4 +22,4 @@ class MobileNetV4(nn.Module):
         return self.model(x)
     
     def init_weights(self, pretrained=None):
-        pass  # handled by timm
+        pass 

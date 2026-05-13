@@ -6,21 +6,9 @@ from ..builder import LOSSES
 
 
 def focal_loss(student_feat, teacher_feat, gt_bboxes, img_metas):
-    """Focal distillation loss — focuses on object regions.
-
-    Args:
-        student_feat (Tensor): Student FPN feature (B, C, H, W)
-        teacher_feat (Tensor): Teacher FPN feature (B, C, H, W)
-        gt_bboxes (list[Tensor]): Ground truth boxes for each image
-        img_metas (list[dict]): Image metadata (contains img shape)
-
-    Returns:
-        Tensor: Scalar focal distillation loss
-    """
     B, C, H, W = student_feat.shape
     device = student_feat.device
 
-    # Build spatial attention mask from ground truth boxes
     mask = torch.ones(B, 1, H, W, device=device) * 0.5
 
     for i, bboxes in enumerate(gt_bboxes):
@@ -41,10 +29,9 @@ def focal_loss(student_feat, teacher_feat, gt_bboxes, img_metas):
             if x2 > x1 and y2 > y1:
                 mask[i, 0, y1:y2, x1:x2] = 1.0
 
-    # Normalise mask
+    
     mask = mask / (mask.sum() + 1e-6)
 
-    # Weighted MSE loss — penalise more near objects
     diff = (student_feat - teacher_feat.detach()) ** 2
     loss = (mask * diff.mean(dim=1, keepdim=True)).sum()
 
@@ -52,15 +39,6 @@ def focal_loss(student_feat, teacher_feat, gt_bboxes, img_metas):
 
 
 def global_loss(student_feat, teacher_feat):
-    """Global distillation loss — matches channel correlations (Gram matrix).
-
-    Args:
-        student_feat (Tensor): Student FPN feature (B, C, H, W)
-        teacher_feat (Tensor): Teacher FPN feature (B, C, H, W)
-
-    Returns:
-        Tensor: Scalar global distillation loss
-    """
     B, C, H, W = student_feat.shape
 
     # Reshape to (B, C, H*W)
@@ -83,17 +61,6 @@ def global_loss(student_feat, teacher_feat):
 
 @LOSSES.register_module()
 class FGDLoss(nn.Module):
-    """Focal and Global Knowledge Distillation Loss for object detection.
-
-    Based on: Yang et al., "Focal and Global Knowledge Distillation
-    for Detectors", CVPR 2022.
-
-    Args:
-        alpha_focal (float): Weight for focal distillation loss.
-        alpha_global (float): Weight for global distillation loss.
-        loss_weight (float): Overall weight of the FGD loss.
-    """
-
     def __init__(self,
                  alpha_focal=0.0005,
                  alpha_global=0.0005,
@@ -103,8 +70,7 @@ class FGDLoss(nn.Module):
         self.alpha_focal = alpha_focal
         self.alpha_global = alpha_global
         self.loss_weight = loss_weight
-        # Weights per FPN level [P2, P3, P4, P5]
-        # Default: emphasise deeper levels where capacity gap is smaller
+
         if level_weights is None:
             self.level_weights = [0.5, 0.5, 1.0, 2.0]
         else:
@@ -115,17 +81,7 @@ class FGDLoss(nn.Module):
                 teacher_feats,
                 gt_bboxes,
                 img_metas):
-        """Forward function.
 
-        Args:
-            student_feats (list[Tensor]): Student FPN features [P2,P3,P4,P5]
-            teacher_feats (list[Tensor]): Teacher FPN features [P2,P3,P4,P5]
-            gt_bboxes (list[Tensor]): Ground truth boxes per image
-            img_metas (list[dict]): Image metadata per image
-
-        Returns:
-            dict: losses containing loss_focal and loss_global
-        """
         assert len(student_feats) == len(teacher_feats)
 
         loss_focal_total = 0.0
